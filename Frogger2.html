@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Frogger Game</title>
+<style>
+  body {
+    margin: 0;
+    /* overflow: hidden; Removed as it might clip controls */
+    font-family: sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding-top: 10px; /* Add some padding at the top */
+  }
+  canvas {
+    border: 1px solid black;
+    background: #6082B4; /* Steel-blueish river color */
+  }
+  #controlsContainer {
+    text-align: center;
+    margin-top: 15px; /* Increased margin */
+    user-select: none; /* Prevent text selection */
+    -webkit-user-select: none; /* Safari */
+    -ms-user-select: none; /* IE 10+ */
+  }
+  #controlsContainer button {
+    padding: 15px 20px; /* Further increased padding */
+    font-size: 28px;   /* Further increased font size */
+    margin: 5px;
+    min-width: 60px;   /* Increased min-width */
+    min-height: 60px;  /* Increased min-height */
+    border: 2px solid #adadad; /* Slightly darker border */
+    background-color: #f0f0f0;
+    border-radius: 8px; /* Slightly more rounded */
+    cursor: pointer;
+    touch-action: manipulation; /* Improve touch responsiveness, prevent double-tap zoom */
+  }
+  #controlsContainer button:active {
+    background-color: #c5c5c5; /* Darker feedback on tap */
+  }
+  #bottomControls {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+</style>
+</head>
+<body>
+
+<canvas id="gameCanvas" width="400" height="400"></canvas>
+<div id="controlsContainer">
+  <button id="btnUp" aria-label="Up">↑</button>
+  <div id="bottomControls">
+    <button id="btnLeft" aria-label="Left">←</button>
+    <button id="btnDown" aria-label="Down">↓</button>
+    <button id="btnRight" aria-label="Right">→</button>
+  </div>
+</div>
+
+<script>
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  const btnUp = document.getElementById('btnUp');
+  const btnLeft = document.getElementById('btnLeft');
+  const btnDown = document.getElementById('btnDown');
+  const btnRight = document.getElementById('btnRight');
+
+  const BANK_COLOR = '#90EE90'; // Light green
+  const BANK_HEIGHT = 40;
+
+  const LILY_PAD_COLOR = '#2E8B57'; // Sea Green
+  const lilyPads = [
+    { x: 60, y: 85, radius: 10 },   // Near first log path
+    { x: 320, y: 135, radius: 12 }, // Near second log path
+    { x: 120, y: 185, radius: 9 },  // Near third log path
+    { x: 280, y: 235, radius: 11 }  // Near fourth log path
+  ];
+
+  let score = 0;
+  let highestY = canvas.height - BANK_HEIGHT; // Frog's initial Y
+  let isGameOver = false;
+  let message = "";
+
+  const frog = {
+    x: canvas.width / 2 - 15,
+    y: canvas.height - 40,
+    width: 30,
+    height: 30,
+    color: 'green', // Frog color
+    dx: 0,
+    dy: 0
+  };
+
+  const logs = [
+    { x: 50, y: 60, width: 120, height: 20, speed: 1.2 },    // L1
+    { x: 200, y: 90, width: 150, height: 20, speed: -1.5 }, // L2
+    { x: 0, y: 120, width: 100, height: 20, speed: 1 },      // L3
+    { x: 250, y: 150, width: 100, height: 20, speed: -1 },   // L4
+    { x: 100, y: 180, width: 130, height: 20, speed: 1.5 },  // L5
+    { x: 30, y: 210, width: 120, height: 20, speed: -1.2 },   // L6
+    { x: 180, y: 240, width: 150, height: 20, speed: 1.8 },  // L7
+    { x: 0, y: 270, width: 100, height: 20, speed: -1 },     // L8
+    { x: 200, y: 300, width: 130, height: 20, speed: 1.3 },   // L9
+    { x: 70, y: 330, width: 100, height: 20, speed: -1.1 }    // L10 (newly added log)
+  ];
+
+  function drawFrogSprite() {
+    const frogX = frog.x;
+    const frogY = frog.y;
+    const frogWidth = frog.width;
+    const frogHeight = frog.height;
+    const frogColor = frog.color;
+
+    // Main Body (ellipse, slightly flatter)
+    ctx.fillStyle = frogColor;
+    ctx.beginPath();
+    // Ellipse parameters: x, y, radiusX, radiusY, rotation, startAngle, endAngle
+    ctx.ellipse(frogX + frogWidth / 2, frogY + frogHeight / 2, frogWidth / 2, frogHeight / 2 - 4, 0, 0, 2 * Math.PI);
+    ctx.fill();
+
+    // Head (circle, positioned towards the 'top' of the frog relative to its body)
+    const headRadius = frogWidth / 3;
+    const headX = frogX + frogWidth / 2;
+    const headY = frogY + headRadius - 2; // Position head towards the top
+    
+    ctx.fillStyle = frogColor; // Ensure frog color is used for head too
+    ctx.beginPath();
+    ctx.arc(headX, headY, headRadius, 0, 2 * Math.PI);
+    ctx.fill();
+    
+    // Eyes (two small black circles on the head part)
+    ctx.fillStyle = 'black';
+    const eyeRadius = frogWidth / 10; // Scaled eye radius
+    const eyeY = headY - headRadius / 3; // Position eyes on the upper part of the head
+    const eyeXOffset = headRadius / 1.5;
+
+    // Left Eye
+    ctx.beginPath();
+    ctx.arc(headX - eyeXOffset, eyeY, eyeRadius, 0, 2 * Math.PI);
+    ctx.fill();
+
+    // Right Eye
+    ctx.beginPath();
+    ctx.arc(headX + eyeXOffset, eyeY, eyeRadius, 0, 2 * Math.PI);
+    ctx.fill();
+
+    // Simple Hind Legs (ellipses, angled outwards from the rear-sides of the body)
+    // These are drawn last to appear on top or beside, adjust as needed for layering.
+    ctx.fillStyle = frogColor;
+    const legWidth = frogWidth / 3.5;
+    const legHeight = frogHeight / 2.5;
+    const bodyCenterX = frogX + frogWidth / 2;
+    const bodyCenterY = frogY + frogHeight / 2;
+
+    // Back Left Leg
+    ctx.beginPath();
+    // Ellipse: x, y (center of leg), radiusX, radiusY, rotation, startAngle, endAngle
+    ctx.save(); // Save context state
+    ctx.translate(bodyCenterX - frogWidth / 2.5, bodyCenterY + frogHeight / 4);
+    ctx.rotate(Math.PI / 5); // Rotate leg slightly
+    ctx.ellipse(0, 0, legWidth, legHeight, 0, 0, 2 * Math.PI);
+    ctx.fill();
+    ctx.restore(); // Restore context state
+
+    // Back Right Leg
+    ctx.beginPath();
+    ctx.save(); // Save context state
+    ctx.translate(bodyCenterX + frogWidth / 2.5, bodyCenterY + frogHeight / 4);
+    ctx.rotate(-Math.PI / 5); // Rotate leg slightly in the other direction
+    ctx.ellipse(0, 0, legWidth, legHeight, 0, 0, 2 * Math.PI);
+    ctx.fill();
+    ctx.restore(); // Restore context state
+  }
+
+  function drawFrog() {
+    drawFrogSprite();
+  }
+
+  function drawLogs() {
+    const mainLogColor = '#8B4513';     // SaddleBrown (current color)
+    const logOutlineColor = '#5C3A21';  // Darker brown
+    const woodGrainColor = '#A0522D';   // Sienna
+
+    logs.forEach(log => {
+      // 1. Draw Main Log Body
+      ctx.fillStyle = mainLogColor;
+      ctx.fillRect(log.x, log.y, log.width, log.height);
+
+      // 2. Draw Log Outline
+      ctx.strokeStyle = logOutlineColor;
+      ctx.lineWidth = 2; 
+      ctx.strokeRect(log.x, log.y, log.width, log.height);
+
+      // 3. Draw Wood Grain Lines
+      ctx.strokeStyle = woodGrainColor;
+      ctx.lineWidth = 1;
+      const numGrains = 3;
+      for (let i = 1; i <= numGrains; i++) {
+        const grainY = log.y + (log.height / (numGrains + 1)) * i;
+        ctx.beginPath();
+        ctx.moveTo(log.x + 5, grainY);
+        // Simple wavy line using quadraticCurveTo
+        // The control point's Y is offset slightly to create a wave
+        // Alternate wave direction for visual variety
+        const waveAmount = 2.5; // Max height of the wave
+        const controlPointYOffset = (i % 2 === 0 ? -waveAmount : waveAmount);
+        ctx.quadraticCurveTo(log.x + log.width / 2, grainY + controlPointYOffset, log.x + log.width - 5, grainY);
+        ctx.stroke();
+      }
+    });
+  }
+
+  function drawLilyPads() {
+    ctx.fillStyle = LILY_PAD_COLOR;
+    lilyPads.forEach(pad => {
+      ctx.beginPath();
+      ctx.arc(pad.x, pad.y, pad.radius, 0, 2 * Math.PI);
+      ctx.fill();
+      // Optional: Add a small notch or line to the lily pad for detail
+      ctx.fillStyle = '#206640'; // Darker shade for notch
+      ctx.beginPath();
+      ctx.moveTo(pad.x, pad.y); // Center of the pad
+      // Arc for the notch: center x, center y, radius (smaller than pad), startAngle, endAngle
+      // This creates a small wedge. Angles might need adjustment for desired look.
+      ctx.arc(pad.x, pad.y, pad.radius * 0.6, Math.PI * 1.2, Math.PI * 1.7, false); // Adjusted end angle
+      ctx.closePath(); // This will draw a line back to pad.x, pad.y creating the wedge
+      ctx.fill();
+    });
+  }
+
+  function moveLogs() {
+    logs.forEach(log => {
+      log.x += log.speed;
+      if (log.x + log.width < 0 && log.speed < 0) {
+        log.x = canvas.width;
+      } else if (log.x > canvas.width && log.speed > 0) {
+        log.x = -log.width;
+      }
+    });
+  }
+
+  function resetGame() {
+    frog.x = canvas.width / 2 - 15;
+    frog.y = canvas.height - BANK_HEIGHT;
+    score = 0;
+    highestY = frog.y;
+    isGameOver = false;
+    message = "";
+  }
+
+  function checkWin() {
+    return frog.y < BANK_HEIGHT;
+  }
+
+  function detectCollision() {
+    let onLog = false;
+    let collidedLogSpeed = 0; // Store speed of log frog is on
+
+    for (const log of logs) {
+      if (frog.x < log.x + log.width &&
+          frog.x + frog.width > log.x &&
+          frog.y < log.y + log.height &&
+          frog.y + frog.height > log.y) {
+        onLog = true;
+        collidedLogSpeed = log.speed;
+        break; 
+      }
+    }
+
+    if (onLog) {
+      frog.x += collidedLogSpeed; // Move with the log
+    }
+
+    // Boundary checks
+    if (frog.x < 0) frog.x = 0;
+    if (frog.x + frog.width > canvas.width) frog.x = canvas.width - frog.width;
+    // frog.y boundaries are implicitly handled by win (top bank) or being on bottom bank.
+    // If frog goes > canvas.height - BANK_HEIGHT while on bottom bank, it's fine.
+    // If frog goes < 0, it's handled by checkWin.
+
+    // Game Over condition: In water zone AND not on a log
+    if (!onLog && frog.y >= BANK_HEIGHT && frog.y < canvas.height - BANK_HEIGHT) {
+      return { gameOver: true, message: "You fell in the water! Game Over." };
+    }
+    
+    return { gameOver: false, message: "" }; // No game-ending collision
+  }
+
+  function gameLoop() {
+    if (isGameOver) {
+      // Display game over message
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+      ctx.fillRect(0, canvas.height / 2 - 40, canvas.width, 80);
+      ctx.fillStyle = 'white';
+      ctx.font = '22px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText(message, canvas.width / 2, canvas.height / 2 -10);
+      ctx.font = '16px Arial';
+      ctx.fillText("Press any key to restart", canvas.width / 2, canvas.height / 2 + 20);
+      ctx.textAlign = 'left'; // Reset alignment
+      requestAnimationFrame(gameLoop); // Keep drawing message
+      return; // Stop further game logic if game is over
+    }
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Draw riverbanks
+    ctx.fillStyle = BANK_COLOR;
+    ctx.fillRect(0, 0, canvas.width, BANK_HEIGHT); // Top bank
+    ctx.fillRect(0, canvas.height - BANK_HEIGHT, canvas.width, BANK_HEIGHT); // Bottom bank
+
+    drawLilyPads(); 
+
+    moveLogs();
+    drawLogs();
+    drawFrog();
+
+    const collisionResult = detectCollision();
+
+    if (collisionResult.gameOver) {
+      isGameOver = true;
+      message = collisionResult.message;
+    } else if (checkWin()) {
+      isGameOver = true;
+      message = "You crossed the river! You win!";
+    }
+
+    // Display Score
+    ctx.fillStyle = 'black';
+    ctx.font = '20px Arial';
+    ctx.fillText('Score: ' + score, 10, 30);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Keyboard controls
+  document.addEventListener('keydown', function(e) {
+    if (isGameOver) {
+      resetGame();
+      return;
+    }
+    
+    switch(e.key) {
+      case 'ArrowUp':
+        frog.y -= frog.height; 
+        if (frog.y < highestY) {
+          score += 10; 
+          highestY = frog.y; 
+        }
+        break;
+      case 'ArrowDown': frog.y += frog.height; break;
+      case 'ArrowLeft': frog.x -= frog.width; break;
+      case 'ArrowRight': frog.x += frog.width; break;
+    }
+
+    // Constrain frog to canvas boundaries (especially Y for banks)
+    // Y boundary for top bank (win condition implies frog.y can be < BANK_HEIGHT)
+    // If frog moves up into bank area and it's not a win yet (e.g. mid-jump onto bank),
+    // it should be allowed. Win is checked after movement.
+    // If frog moves UP from top bank, prevent it.
+    if (frog.y < 0 && highestY < BANK_HEIGHT) { // If already won and trying to move further up from bank
+        frog.y = 0; // Keep it on the edge of the bank. Or BANK_HEIGHT - frog.height if that's preferred.
+                   // For simplicity, 0 is fine as checkWin is just < BANK_HEIGHT.
+    }
+
+
+    // Prevent frog from moving DOWN off the bottom bank
+    if (frog.y + frog.height > canvas.height) {
+        frog.y = canvas.height - frog.height;
+    }
+    
+    // X boundaries are handled in detectCollision, but good to have here for immediate feedback
+    // and to prevent movement into "void" before collision detection runs.
+    if (frog.x < 0) frog.x = 0;
+    if (frog.x + frog.width > canvas.width) frog.x = canvas.width - frog.width;
+
+  });
+
+  // Keyboard controls
+  document.addEventListener('keydown', function(e) {
+    if (isGameOver) {
+      handleFrogAction('any_key_to_reset'); // Action string doesn't matter here
+      return;
+    }
+
+    switch(e.key) {
+      case 'ArrowUp':
+      case 'ArrowDown':
+      case 'ArrowLeft':
+      case 'ArrowRight':
+        handleFrogAction(e.key); // Pass the actual key event string
+        break;
+    }
+  });
+
+  // Touch Controls Event Listeners
+  btnUp.addEventListener('click', function() { handleFrogAction('Up'); });
+  btnDown.addEventListener('click', function() { handleFrogAction('Down'); });
+  btnLeft.addEventListener('click', function() { handleFrogAction('Left'); });
+  btnRight.addEventListener('click', function() { handleFrogAction('Right'); });
+
+  // Centralized Frog Action Handler
+  function handleFrogAction(action) {
+    if (isGameOver) {
+      resetGame();
+      return;
+    }
+
+    // const previousFrogY = frog.y; // Not strictly needed here if score logic is self-contained for Up
+
+    switch(action) {
+      case 'ArrowUp':
+      case 'Up': 
+        frog.y -= frog.height;
+        if (frog.y < highestY) {
+          score += 10;
+          highestY = frog.y;
+        }
+        break;
+      case 'ArrowDown':
+      case 'Down':
+        frog.y += frog.height;
+        break;
+      case 'ArrowLeft':
+      case 'Left':
+        frog.x -= frog.width;
+        break;
+      case 'ArrowRight':
+      case 'Right':
+        frog.x += frog.width;
+        break;
+    }
+
+    // Boundary constraints
+    if (frog.y < 0 && highestY < BANK_HEIGHT) { 
+        frog.y = 0; 
+    } else if (frog.y < 0) { 
+        // This case implies frog made it to y < 0 but highestY was not < BANK_HEIGHT
+        // (e.g. jumped from y=20 to y=-10, but highestY was still on starting bank)
+        // This situation should ideally be caught by checkWin before allowing further jumps
+        // or the checkWin logic handles this. For now, clamp at 0.
+        frog.y = 0;
+    }
+
+    if (frog.y + frog.height > canvas.height) {
+        frog.y = canvas.height - frog.height;
+    }
+    if (frog.x < 0) frog.x = 0;
+    if (frog.x + frog.width > canvas.width) frog.x = canvas.width - frog.width;
+  }
+
+  resetGame(); // Ensure a clean state before the first game loop
+  gameLoop(); // Start the game
+</script>
+
+</body>
+</html>
